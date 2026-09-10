@@ -1,0 +1,4 @@
+infra/.env
+
+#Docker compose 
+infra/pgadmin/
