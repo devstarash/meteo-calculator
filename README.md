@@ -27,7 +27,7 @@
 
 4. Запустите Docker:
    ```
-   sudo docker compose up -d
+   docker compose up -d
    ```
 
 
