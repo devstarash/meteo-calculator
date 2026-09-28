@@ -40,19 +40,6 @@ COMMENT ON COLUMN parameter_types.name IS 'Наименование параме
 COMMENT ON COLUMN parameter_types.min_value IS 'Минимальное значение';
 COMMENT ON COLUMN parameter_types.max_value IS 'Максимальное значение';
 
-CREATE TABLE parameter_values(
-    id INT PRIMARY KEY,
-    batch_id INT NOT NULL,
-    parameter_type_id INT NOT NULL,
-    value DECIMAL NOT NULL
-);
-
-COMMENT ON TABLE parameter_values IS 'Измеренные значения параметров';
-COMMENT ON COLUMN parameter_values.id IS 'Уникальный идентификатор записи';
-COMMENT ON COLUMN parameter_values.batch_id IS 'Пачка измерений (batches)';
-COMMENT ON COLUMN parameter_values.parameter_type_id IS 'Тип измеренного параметра (parameter_types)';
-COMMENT ON COLUMN parameter_values.value IS 'Измеренное значение';
-
 -- Заполнение тестовыми данными
 INSERT INTO base_units (id, name) VALUES
     (1, 'Температура'),
@@ -82,29 +69,109 @@ INSERT INTO parameter_types (id, equipment_type_id, unit_id, name, min_value, ma
     (9,  2, 6, 'Высота метеопоста',     NULL, NULL),
     (10, 2, 5, 'Дальность сноса пуль',  0,   150);
 
--- Перенос данных из parameters в parameter_values
-INSERT INTO parameter_values (id, batch_id, parameter_type_id, value) VALUES
-    (1, 1, 1, 25.0),
-    (2, 1, 2, 765),
-    (3, 1, 3, 15),
-    (4, 1, 4, 100),
-    (5, 1, 5, 6);
+-- добавляем в parameters новые колонки
+ALTER TABLE parameters ADD COLUMN batch_id INT;
+ALTER TABLE parameters ADD COLUMN parameter_type_id INT;
+ALTER TABLE parameters ADD COLUMN value NUMERIC(6, 1);
 
-INSERT INTO parameter_values (id, batch_id, parameter_type_id, value) VALUES
-    (6, 2, 6, -5.0),
-    (7, 2, 7, 743),
-    (8, 2, 8, 30),
-    (9, 2, 9, 60),
-    (10, 2, 10, 85);
+COMMENT ON TABLE parameters IS 'Измеренные значения, одна строка = один параметр одного замера';
+COMMENT ON COLUMN parameters.batch_id IS 'К какой пачке относится значение (batches)';
+COMMENT ON COLUMN parameters.parameter_type_id IS 'Что за параметр (parameter_types)';
+COMMENT ON COLUMN parameters.value IS 'Значение параметра';
 
-INSERT INTO parameter_values (id, batch_id, parameter_type_id, value) VALUES
-    (11, 3, 1, 17.0),
-    (12, 3, 2, 750),
-    (13, 3, 3, 9),
-    (14, 3, 4, 100),
-    (15, 3, 5, 4);
+-- раньше пачка ссылалась на параметры, теперь наоборот
+UPDATE parameters SET batch_id = (SELECT b.id FROM batches b WHERE b.parameter_id = parameters.id);
 
---Удаление ненужных таблиц/колонок
-ALTER TABLE batches DROP COLUMN parameter_id;
-DROP TABLE parameters;
+-- разносим значения по отдельным строкам
+-- исходные строки отличаем по тому, что у них еще нет parameter_type_id
+-- старые колонки копируем как есть, потому что они пока NOT NULL
+-- id считаем от максимального, чтобы не было повторов
 
+-- высота метеопоста
+INSERT INTO parameters (id, station_height, temperature, pressure,
+                        wind_direction, wind_speed, bullet_drift, batch_id,
+                        parameter_type_id, value)
+SELECT p.id + (SELECT MAX(id) FROM parameters),
+       p.station_height, p.temperature, p.pressure,
+       p.wind_direction, p.wind_speed, p.bullet_drift, p.batch_id,
+       (SELECT pt.id FROM parameter_types pt WHERE pt.name = 'Высота метеопоста'
+       AND pt.equipment_type_id = b.equipment_type_id),
+       p.station_height
+FROM parameters p
+JOIN batches b ON p.batch_id = b.id
+WHERE p.parameter_type_id IS NULL;
+
+-- давление
+INSERT INTO parameters (id, station_height, temperature, pressure,
+                        wind_direction, wind_speed, bullet_drift, batch_id,
+                        parameter_type_id, value)
+SELECT p.id + (SELECT MAX(id) FROM parameters),
+       p.station_height, p.temperature, p.pressure,
+       p.wind_direction, p.wind_speed, p.bullet_drift, p.batch_id,
+       (SELECT pt.id FROM parameter_types pt WHERE pt.name = 'Давление'
+        AND pt.equipment_type_id = b.equipment_type_id),
+       p.pressure
+FROM parameters p
+JOIN batches b ON p.batch_id = b.id
+WHERE p.parameter_type_id IS NULL;
+
+-- направление ветра
+INSERT INTO parameters (id, station_height, temperature, pressure,
+                        wind_direction, wind_speed, bullet_drift, batch_id,
+                        parameter_type_id, value)
+SELECT p.id + (SELECT MAX(id) FROM parameters),
+       p.station_height, p.temperature, p.pressure,
+       p.wind_direction, p.wind_speed, p.bullet_drift, p.batch_id,
+       (SELECT pt.id FROM parameter_types pt WHERE pt.name = 'Направление ветра'
+        AND pt.equipment_type_id = b.equipment_type_id),
+       p.wind_direction
+FROM parameters p
+JOIN batches b ON p.batch_id = b.id
+WHERE p.parameter_type_id IS NULL;
+
+-- скорость ветра, есть только у ДМК
+INSERT INTO parameters (id, station_height, temperature, pressure,
+                        wind_direction, wind_speed, bullet_drift, batch_id,
+                        parameter_type_id, value)
+SELECT p.id + (SELECT MAX(id) FROM parameters),
+       p.station_height, p.temperature, p.pressure,
+       p.wind_direction, p.wind_speed, p.bullet_drift, p.batch_id,
+       (SELECT pt.id FROM parameter_types pt WHERE pt.name = 'Скорость ветра'
+        AND pt.equipment_type_id = b.equipment_type_id),
+       p.wind_speed
+FROM parameters p
+JOIN batches b ON p.batch_id = b.id
+WHERE p.parameter_type_id IS NULL AND p.wind_speed IS NOT NULL;
+
+-- снос пуль, есть только у ВР
+INSERT INTO parameters (id, station_height, temperature, pressure,
+                        wind_direction, wind_speed, bullet_drift, batch_id,
+                        parameter_type_id, value)
+SELECT p.id + (SELECT MAX(id) FROM parameters),
+       p.station_height, p.temperature, p.pressure,
+       p.wind_direction, p.wind_speed, p.bullet_drift, p.batch_id,
+       (SELECT pt.id FROM parameter_types pt WHERE pt.name = 'Дальность сноса пуль'
+        AND pt.equipment_type_id = b.equipment_type_id),
+       p.bullet_drift
+FROM parameters p
+JOIN batches b ON p.batch_id = b.id
+WHERE p.parameter_type_id IS NULL AND p.bullet_drift IS NOT NULL;
+
+-- исходную строку не удаляем, а делаем из нее температуру
+UPDATE parameters SET value = temperature, parameter_type_id = (
+    SELECT pt.id FROM batches b
+    JOIN parameter_types pt ON b.equipment_type_id = pt.equipment_type_id
+    WHERE b.id = parameters.batch_id AND pt.name = 'Температура воздуха'
+    )
+WHERE parameter_type_id IS NULL;
+
+-- старые колонки больше не нужны, все уже лежит в value
+ALTER TABLE parameters DROP COLUMN station_height CASCADE;
+ALTER TABLE parameters DROP COLUMN temperature    CASCADE;
+ALTER TABLE parameters DROP COLUMN pressure       CASCADE;
+ALTER TABLE parameters DROP COLUMN wind_direction CASCADE;
+ALTER TABLE parameters DROP COLUMN wind_speed     CASCADE;
+ALTER TABLE parameters DROP COLUMN bullet_drift   CASCADE;
+
+-- пачка больше не ссылается на параметры, связь теперь через parameters.batch_id
+ALTER TABLE batches DROP COLUMN parameter_id CASCADE;
