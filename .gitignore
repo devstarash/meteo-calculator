@@ -2,3 +2,6 @@ infra/.env
 
 #Docker compose 
 infra/pgadmin/
+
+#MacOS
+.DS_Store
