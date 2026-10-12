@@ -1,10 +1,14 @@
---Миграция создания таблиц, заполнения тестовыми данными и создание связей
+--Миграция создания таблиц, заполнения тестовыми данными и создания связей
 DO $$
 BEGIN
     -- Транзакция 1: таблицы и счётчики
     BEGIN
         DROP TABLE IF EXISTS parameters, batches, parameter_types, units, base_units,
-                             users, equipment_types, positions CASCADE;
+                             users, equipment_types, positions, temperature_corrections CASCADE;
+
+        DROP SEQUENCE IF EXISTS positions_id_seq, equipment_types_id_seq, users_id_seq,
+                                base_units_id_seq, units_id_seq, parameter_types_id_seq,
+                                batches_id_seq, parameters_id_seq, temperature_corrections_id_seq;
 
         -- счётчики
         CREATE SEQUENCE positions_id_seq;
@@ -22,12 +26,19 @@ BEGIN
             id INT DEFAULT nextval('positions_id_seq'),
             title VARCHAR(30)
         );
+        COMMENT ON TABLE positions IS 'Должности пользователей';
+        COMMENT ON COLUMN positions.id IS 'Уникальный идентификатор записи';
+        COMMENT ON COLUMN positions.title IS 'Наименование должности';
 
         CREATE TABLE equipment_types(
-            id INT DEFAULT netval('equipment_types_id_seq'),
+            id INT DEFAULT nextval('equipment_types_id_seq'),
             short_name VARCHAR(15),
             full_name VARCHAR(100)
         );
+        COMMENT ON TABLE equipment_types IS 'Типы оборудования';
+        COMMENT ON COLUMN equipment_types.id IS 'Уникальный идентификатор записи';
+        COMMENT ON COLUMN equipment_types.short_name IS 'Краткое наименование (ДМК, ВР)';
+        COMMENT ON COLUMN equipment_types.full_name IS 'Полное наименование оборудования';
 
         CREATE TABLE users(
             id INT DEFAULT nextval('users_id_seq'),
@@ -36,11 +47,20 @@ BEGIN
             patronymic VARCHAR(50),
             position_id INT
         );
+        COMMENT ON TABLE users IS 'Пользователи системы';
+        COMMENT ON COLUMN users.id IS 'Уникальный идентификатор записи';
+        COMMENT ON COLUMN users.name IS 'Имя';
+        COMMENT ON COLUMN users.last_name IS 'Фамилия';
+        COMMENT ON COLUMN users.patronymic IS 'Отчество';
+        COMMENT ON COLUMN users.position_id IS 'Должность пользователя из таблицы positions';
 
         CREATE TABLE base_units(
             id INT DEFAULT nextval('base_units_id_seq'),
             name VARCHAR(30)
         );
+        COMMENT ON TABLE base_units IS 'Базовые единицы измерения';
+        COMMENT ON COLUMN base_units.id IS 'Уникальный идентификатор записи';
+        COMMENT ON COLUMN base_units.name IS 'Наименование базовой величины';
 
         CREATE TABLE units(
             id INT DEFAULT nextval('units_id_seq'),
@@ -48,6 +68,11 @@ BEGIN
             short_name VARCHAR(20),
             conversion_factor NUMERIC
         );
+        COMMENT ON TABLE units IS 'Единицы измерения, привязанные к базовой величине';
+        COMMENT ON COLUMN units.id IS 'Уникальный идентификатор записи';
+        COMMENT ON COLUMN units.base_unit_id IS 'Ссылка на базовую единицу измерения (base_units)';
+        COMMENT ON COLUMN units.short_name IS 'Краткое обозначение единицы (°C, мм рт.ст., м/с)';
+        COMMENT ON COLUMN units.conversion_factor IS 'Коэффициент пересчёта в базовую единицу';
 
         CREATE TABLE parameter_types(
             id INT DEFAULT nextval('parameter_types_id_seq'),
@@ -57,6 +82,13 @@ BEGIN
             min_value NUMERIC,
             max_value NUMERIC
         );
+        COMMENT ON TABLE parameter_types IS 'Типы измеряемых параметров';
+        COMMENT ON COLUMN parameter_types.id IS 'Уникальный идентификатор записи';
+        COMMENT ON COLUMN parameter_types.equipment_type_id IS 'Оборудование, которым измеряется параметр (equipment_types)';
+        COMMENT ON COLUMN parameter_types.unit_id IS 'Единица измерения параметра (units)';
+        COMMENT ON COLUMN parameter_types.name IS 'Наименование параметра (Температура воздуха, Давление)';
+        COMMENT ON COLUMN parameter_types.min_value IS 'Минимальное значение';
+        COMMENT ON COLUMN parameter_types.max_value IS 'Максимальное значение';
 
         CREATE TABLE batches(
             id INT DEFAULT nextval('batches_id_seq'),
@@ -65,6 +97,12 @@ BEGIN
             measured_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        COMMENT ON TABLE batches IS 'Журнал измерений';
+        COMMENT ON COLUMN batches.id IS 'Уникальный идентификатор записи';
+        COMMENT ON COLUMN batches.user_id IS 'Автор измерения (users)';
+        COMMENT ON COLUMN batches.equipment_type_id IS 'Использованное оборудование (equipment_types)';
+        COMMENT ON COLUMN batches.measured_at IS 'Дата/время окончания измерения';
+        COMMENT ON COLUMN batches.created_at IS 'Дата/время создания записи в системе';
 
         CREATE TABLE parameters(
             id INT DEFAULT nextval('parameters_id_seq'),
@@ -72,12 +110,22 @@ BEGIN
             parameter_type_id INT,
             value NUMERIC(6, 1)
         );
+        COMMENT ON TABLE parameters IS 'Измеренные значения, одна строка = один параметр одного замера';
+        COMMENT ON COLUMN parameters.id IS 'Уникальный идентификатор записи';
+        COMMENT ON COLUMN parameters.batch_id IS 'К какой пачке относится значение (batches)';
+        COMMENT ON COLUMN parameters.parameter_type_id IS 'Что за параметр (parameter_types)';
+        COMMENT ON COLUMN parameters.value IS 'Значение параметра';
 
+        -- Таблица 1: поправка для расчёта температуры
         CREATE TABLE temperature_corrections(
             id INT DEFAULT nextval('temperature_corrections_id_seq'),
             temperature NUMERIC(4, 1),
             correction NUMERIC(3, 1)
         );
+        COMMENT ON TABLE temperature_corrections IS 'Таблица 1: поправка ΔTv по измеренной температуре t0';
+        COMMENT ON COLUMN temperature_corrections.id IS 'Уникальный идентификатор записи';
+        COMMENT ON COLUMN temperature_corrections.temperature IS 'Значение температуры t0, °C';
+        COMMENT ON COLUMN temperature_corrections.correction IS 'Поправка ΔTv, °C';
 
         RAISE NOTICE 'Транзакция 1: таблицы и счётчики созданы';
     END;
@@ -139,6 +187,7 @@ BEGIN
             (2, 9, 60), (2, 6, -5.0), (2, 7, 743), (2, 8, 30), (2, 10, 85),
             (3, 4, 100), (3, 1, 17.0), (3, 2, 750), (3, 3, 9), (3, 5, 4);
 
+        -- Таблица 1: поправка ΔTv
         INSERT INTO temperature_corrections (temperature, correction) VALUES
             (0, 0.5),
             (5, 0.5),
