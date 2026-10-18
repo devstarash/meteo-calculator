@@ -8,6 +8,13 @@ BEGIN
 			x1 numeric,
 			y1 numeric
 		);
+
+		COMMENT ON TYPE public.interpolation_type IS
+			'Две соседние точки (x0, y0) и (x1, y1) для линейной интерполяции';
+		COMMENT ON COLUMN public.interpolation_type.x0 IS 'x нижней точки';
+		COMMENT ON COLUMN public.interpolation_type.y0 IS 'y нижней точки';
+		COMMENT ON COLUMN public.interpolation_type.x1 IS 'x верхней точки';
+		COMMENT ON COLUMN public.interpolation_type.y1 IS 'y верхней точки';
 	EXCEPTION
 		WHEN duplicate_object THEN
 			RAISE NOTICE 'Тип public.interpolation_type уже существует';
@@ -76,6 +83,10 @@ BEGIN
 			RETURN var_interpolation;
 		END;
 		$func$;
+
+		COMMENT ON FUNCTION public.get_temperature_interpolation_params(numeric) IS
+			'Принимает температуру, возвращает ближайшие точки снизу и сверху из таблицы temperature_corrections. '
+			'Если температура за границами таблицы, берётся крайняя точка';
 	EXCEPTION
 		WHEN OTHERS THEN
 			RAISE NOTICE 'Ошибка при создании get_temperature_interpolation_params: %', SQLERRM;
@@ -94,7 +105,7 @@ BEGIN
 		DECLARE
 			result numeric;
 		BEGIN
-			-- Точки совпадают -> можно вернуть любой из y-ков
+			-- Точки совпадают: возвращаем y0, чтобы не делить на ноль
 			IF interpolation_params.x1 = interpolation_params.x0 THEN
 				RETURN interpolation_params.y0;
 			END IF;
@@ -107,14 +118,18 @@ BEGIN
 			RETURN result;
 		END;
 		$func$;
+
+		COMMENT ON FUNCTION public.calc_linear_interpolation(numeric, public.interpolation_type) IS
+			'Принимает x и две точки, возвращает y по формуле линейной интерполяции. '
+			'Если x0 = x1, возвращает y0';
 	EXCEPTION
 		WHEN OTHERS THEN
 			RAISE NOTICE 'Ошибка при создании calc_linear_interpolation: %', SQLERRM;
 			RAISE;
 	END;
 
-	--  Поправка по температуре. Решил добавить такую функцию. 
-    -- Проверяет, что температура не меньше 0, и вызывает две предыдущие функции
+	-- Поправка по температуре.
+	-- Проверяет, что температура не меньше 0, и вызывает две предыдущие функции
 	BEGIN
 		CREATE OR REPLACE FUNCTION public.get_temperature_correction(
 			x_value numeric
@@ -137,6 +152,9 @@ BEGIN
 			RETURN result;
 		END;
 		$func$;
+
+		COMMENT ON FUNCTION public.get_temperature_correction(numeric) IS
+			'Принимает температуру, возвращает поправку по таблице 1 ТЗ. Ниже 0 возвращает 0';
 	EXCEPTION
 		WHEN OTHERS THEN
 			RAISE NOTICE 'Ошибка при создании get_temperature_correction: %', SQLERRM;
